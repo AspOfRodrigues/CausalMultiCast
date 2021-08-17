@@ -1,12 +1,19 @@
-import CausalMultiCast.CausalMultiCast;
+import CausalMulticast.CausalMulticast;
+import CausalMulticast.ICausalMulticast;
 import java.util.Scanner;
 
-public class Client {
-
-
+public class Client implements ICausalMulticast {
+    private CausalMulticast cm;
     public Client(String ip, int port) throws Exception {
-        new CausalMultiCast(ip,port);
+        cm = new CausalMulticast(ip,port, this);
     }
+
+
+    @Override
+    public void deliver(String msg){
+
+    }
+
 
     public static void main(String args[]) throws Exception {
         String ip;
