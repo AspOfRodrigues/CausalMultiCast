@@ -51,57 +51,29 @@ public class CausalMulticast {
 
     private ArrayList<Integer> disabledProcesses = new ArrayList<Integer>();
     private ArrayList<Integer> enabledProcesses = new ArrayList<Integer>();
-
-    private void disableProcess(int id) {
-        System.out.println("Desativando processo: " + id);
-        disabledProcesses.add(id);
-        enabledProcesses.remove((Object) id);
-    }
-
-    private void updateDelayedProcess() {
-        System.out.println("Trocando lista de processos ativos com desativados");
-        var temp = disabledProcesses;
-        disabledProcesses = enabledProcesses;
-        enabledProcesses = temp;
-    }
-
-    private void resetDisabledProcess() {
-        System.out.println("Resetando lista de processos desativados");
-        disabledProcesses.clear();
-        for (var process : processList.entrySet()) {
-            enabledProcesses.add(process.getValue());
-        }
-    }
+    Scanner scanner = new Scanner(System.in);
 
     public CausalMulticast(String ip, Integer port, ICausalMulticast client) throws Exception {
         this.processList = new HashMap<>();
         this.client = client;
         this.socket = new DatagramSocket(port);
 
-        for (int i = 0; i < MAX_NUMBER_PROCESS; i++) {
-            for (int j = 0; j < MAX_NUMBER_PROCESS; j++) {
-                matrixClock[i][j] = 0;
-            }
-        }
 
         discover(ip, port);
         resetDisabledProcess();
+
+        for (int i = 0; i < MAX_NUMBER_PROCESS; i++) {
+            for (int j = 0; j < MAX_NUMBER_PROCESS; j++) {
+                if (i == j && i == processId)
+                    matrixClock[i][j] = 0;
+                else
+                    matrixClock[i][j] = -1;
+            }
+        }
+        printMatrixClock();
+
         var pool = Executors.newSingleThreadExecutor();
         pool.execute(new Receiver());
-    }
-
-    private boolean checkTimeout(MulticastSocket s) throws IOException {
-        byte[] buf = new byte[1000];
-        DatagramPacket recv = new DatagramPacket(buf, buf.length);
-        s.setSoTimeout(4000);
-        try {
-            s.receive(recv);
-            String data = new String(recv.getData(), recv.getOffset(), recv.getLength());
-        } catch (SocketTimeoutException e) {
-            System.out.println("No new message received");
-            return true;
-        }
-        return false;
     }
 
     private void discover(String ip, int port) throws Exception {
@@ -156,7 +128,42 @@ public class CausalMulticast {
 
         s.leaveGroup(group);
         this.processId = processList.get(currentProcess);
-        processList.remove(currentProcess);
+//        processList.remove(currentProcess);
+    }
+
+    private void disableProcess(int id) {
+        System.out.println("Desativando processo: " + id);
+        disabledProcesses.add(id);
+        enabledProcesses.remove((Object) id);
+    }
+
+    private void updateDelayedProcess() {
+        System.out.println("Trocando lista de processos ativos com desativados");
+        var temp = disabledProcesses;
+        disabledProcesses = enabledProcesses;
+        enabledProcesses = temp;
+    }
+
+    private void resetDisabledProcess() {
+        System.out.println("Resetando lista de processos desativados");
+        disabledProcesses.clear();
+        for (var process : processList.entrySet()) {
+            enabledProcesses.add(process.getValue());
+        }
+    }
+
+    private boolean checkTimeout(MulticastSocket s) throws IOException {
+        byte[] buf = new byte[1000];
+        DatagramPacket recv = new DatagramPacket(buf, buf.length);
+        s.setSoTimeout(4000);
+        try {
+            s.receive(recv);
+            String data = new String(recv.getData(), recv.getOffset(), recv.getLength());
+        } catch (SocketTimeoutException e) {
+            System.out.println("No new message received");
+            return true;
+        }
+        return false;
     }
 
     private void addProcess(ArrayList<Process> temporaryProcess, String data) {
@@ -169,12 +176,12 @@ public class CausalMulticast {
         }
     }
 
-    Scanner scanner = new Scanner(System.in);
-
     private void queryForDelayedMessage(String msg) {
         Message message = new Message(msg, processId, matrixClock[processId]);
-        printMatrixClock();
+        System.out.println("Piggyback vector clock: " + Arrays.toString(matrixClock[processId]));
         matrixClock[processId][processId] += 1;
+        printMatrixClock();
+
 
         System.out.println("Você deseja enviar para todos processos? 1 - Sim, 2 - Não");
         int sendAll = scanner.nextInt();
@@ -231,6 +238,13 @@ public class CausalMulticast {
         queryForDelayedMessage(msg);
     }
 
+    private void printMatrixClock() {
+        System.out.println("Current process: " + processId);
+        System.out.println("Other process: " + processList);
+        for (int i = 0; i < MAX_NUMBER_PROCESS; i++) {
+            System.out.println(Arrays.toString(matrixClock[i]));
+        }
+    }
 
     private static class Message implements Serializable {
         String message;
@@ -278,14 +292,6 @@ public class CausalMulticast {
         }
     }
 
-    private void printMatrixClock() {
-        System.out.println("Current process: " + processId);
-        System.out.println("Other process: " + processList);
-        for (int i = 0; i < MAX_NUMBER_PROCESS; i++) {
-            System.out.println(Arrays.toString(matrixClock[i]));
-        }
-    }
-
     private class Receiver implements Runnable {
         @Override
         public void run() {
@@ -300,14 +306,13 @@ public class CausalMulticast {
                 }
 
                 Message message = Message.deserialize(recv.getData());
-                matrixClock[message.processId] = message.vectorClock;
+                if (processId != message.processId) matrixClock[message.processId] = message.vectorClock;
 
-                printMatrixClock();
                 buffer.add(message);
                 buffer.sort((msg1, msg2) -> {
                     Integer[] vc1 = msg1.vectorClock;
                     Integer[] vc2 = msg2.vectorClock;
-                    if(vc1 == vc2) return 0;
+                    if (vc1 == vc2) return 0;
                     boolean less = true;
                     for (int i = 0; i < vc1.length; i++) {
                         less = less && vc1[i] <= vc2[i];
@@ -320,16 +325,17 @@ public class CausalMulticast {
 
                 //Delay message delivery
                 for (Message item : buffer) {
-                    System.out.println("_____BEGIN______");
-                    System.out.println(item);
-                    printMatrixClock();
-                    System.out.println("_____END______");
+//                    System.out.println("_____BEGIN______");
+//                    System.out.println(item);
+//                    printMatrixClock();
+//                    System.out.println("_____END______");
                     if (item.delivered) continue;
                     boolean deliver = true;
                     for (int i = 0; i < MAX_NUMBER_PROCESS; i++) {
                         deliver = deliver && item.vectorClock[i] <= matrixClock[processId][i];
                     }
                     if (deliver) {
+                        System.out.println("MENSAGEM ENTREGUE: " + item);
                         item.delivered = true;
                         client.deliver(item.message);
                     }
@@ -345,10 +351,12 @@ public class CausalMulticast {
                         if (matrixClock[i][item.processId] < minCol) minCol = matrixClock[i][item.processId];
                     }
                     if (item.vectorClock[item.processId] <= minCol) {
+                        System.out.println("MENSAGEM DESCARTADA: " + item);
                         buffer.remove(item);
                         index--;
                     }
                 }
+                printMatrixClock();
                 System.out.println("Buffer: " + buffer);
             }
         }
