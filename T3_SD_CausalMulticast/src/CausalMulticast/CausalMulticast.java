@@ -16,7 +16,8 @@ public class CausalMulticast {
 
         /**
          * Construtor da classe processo
-         * @param ip ip passado por parametro na Classe cliente
+         *
+         * @param ip   ip passado por parametro na Classe cliente
          * @param port porta passada por parametro na Classe cliente
          */
         public Process(String ip, int port) {
@@ -67,8 +68,9 @@ public class CausalMulticast {
      * Construtor da classe, atribui nas propriedades os valores passados por parametro e registra o processo no metodo
      * discover
      * todas as posicoes do matrix clock de cada processo sao iniciadas com valor -1
-     * @param ip ip passado por parametro para o registro do processo
-     * @param port porta passada por parametro para o registro do processo
+     *
+     * @param ip     ip passado por parametro para o registro do processo
+     * @param port   porta passada por parametro para o registro do processo
      * @param client proprio cliente passado por parametro
      * @throws Exception
      */
@@ -99,11 +101,12 @@ public class CausalMulticast {
      * Basicamente cria um MulticastSocket e faz o registro no grupo, enquanto o numero de processo maximo
      * nao for atigido, este processo vai enviar um Datagram Packet para descobrir novos processos, caso a mesagem
      * retornada for igual ,significa que este processo sera registrado
-     * @param ip ip passado por parametro para o registro do processo
+     *
+     * @param ip   ip passado por parametro para o registro do processo
      * @param port porta passada por parametro para o registro do processo
      * @throws Exception
      */
-    private void discover(String    ip, int port) throws Exception {
+    private void discover(String ip, int port) throws Exception {
         ArrayList<Process> temporaryProcess = new ArrayList<Process>();
         Process currentProcess = new Process(ip, port);
         temporaryProcess.add(currentProcess);
@@ -129,7 +132,7 @@ public class CausalMulticast {
         long time = System.currentTimeMillis();
         long elapsedTime = 0;
         int timeout = 2000;
-        while(elapsedTime < timeout){
+        while (elapsedTime < timeout) {
             s.send(discoverMsg);
             elapsedTime = System.currentTimeMillis() - time;
         }
@@ -148,6 +151,7 @@ public class CausalMulticast {
 
     /**
      * Desabilita que um processo possa receber a mensagem
+     *
      * @param id id do processo a ser desativado
      */
     private void disableProcess(int id) {
@@ -191,6 +195,7 @@ public class CausalMulticast {
     /**
      * Faz o controle do envio de mensagens, basicamente decide conforme o input do usuario se a mensagem passada por
      * parametro deve ser enviada a todos os processos, ou seletivamente, questionando qual processo enviar
+     *
      * @param msg mensagem a ser enviada aos demais processos
      */
     private void queryForDelayedMessage(String msg) {
@@ -231,6 +236,7 @@ public class CausalMulticast {
      * packet, verificando se o processo em questao a ser enviado, seria um processo habilitado a receber
      * aquela mensagem
      * Simula o comportamento de um multicast usando unicast
+     *
      * @param message mensagem a ser enviada
      */
     private void sendMessageToGroup(Message message) {
@@ -260,7 +266,8 @@ public class CausalMulticast {
 
     /**
      * Envia a mensagem ao grupo multicast criado na fase de descobrimento, gerencia o matrix clock para possibilitar ordenação causal e estabilização de mensagens
-     * @param msg mensagem a ser enviada
+     *
+     * @param msg    mensagem a ser enviada
      * @param client
      */
     public void mcsend(String msg, Object client) {
@@ -289,8 +296,9 @@ public class CausalMulticast {
 
         /**
          * Construtor da classe
-         * @param message a mensagem em si a ser entregue
-         * @param processId o id do processo que enviou a mensagem
+         *
+         * @param message     a mensagem em si a ser entregue
+         * @param processId   o id do processo que enviou a mensagem
          * @param vectorClock vector clock do processo que enviou a mensagem
          */
         public Message(String message, int processId, Integer[] vectorClock) {
@@ -301,6 +309,7 @@ public class CausalMulticast {
 
         /**
          * Desserializa e retorna um objeto mensagem
+         *
          * @param stream
          * @return
          */
@@ -317,8 +326,7 @@ public class CausalMulticast {
         }
 
         /**
-         *
-         * @return  Serializa e retorna a mensagem serializada
+         * @return Serializa e retorna a mensagem serializada
          */
         public byte[] serialize() {
             try {
@@ -333,7 +341,6 @@ public class CausalMulticast {
         }
 
         /**
-         *
          * @return informacoes da mensagem formatadas
          */
         @Override
@@ -376,14 +383,16 @@ public class CausalMulticast {
                     Integer[] vc1 = msg1.vectorClock;
                     Integer[] vc2 = msg2.vectorClock;
                     if (vc1 == vc2) return 0;
-                    boolean less = true;
+                    int sum0 = 0;
+                    int sum1 = 0;
                     for (int i = 0; i < vc1.length; i++) {
-                        less = less && vc1[i] <= vc2[i];
+                        sum0 += vc1[i];
+                        sum1 += vc2[i];
                     }
-                    if (less) return -1;
-                    else return 1;
+                    return Integer.compare(sum0, sum1);
                 });
 
+                System.out.println("Ordered buffer: " + buffer);
                 if (processId != message.processId) matrixClock[processId][message.processId] += 1;
 
                 //Delay message delivery - CAUSAL ORDER
