@@ -7,10 +7,18 @@ import java.util.*;
 import java.util.concurrent.Executors;
 
 public class CausalMulticast {
+    /**
+     * Classe que guardo o ip e porta de um processo
+     */
     private class Process {
         public String ip;
         public int port;
 
+        /**
+         * Construtor da classe processo
+         * @param ip ip passado por parametro na Classe cliente
+         * @param port porta passada por parametro na Classe cliente
+         */
         public Process(String ip, int port) {
             this.ip = ip;
             this.port = port;
@@ -41,18 +49,30 @@ public class CausalMulticast {
     private static final int MAX_NUMBER_PROCESS = 3;
     private static final int TIMEOUT = 5000;
 
+
     private int processId;
     private HashMap<Process, Integer> processList;
     private ICausalMulticast client;
     private DatagramSocket socket;
 
+
     private ArrayList<Message> buffer = new ArrayList<>();
+
     private Integer[][] matrixClock = new Integer[MAX_NUMBER_PROCESS][MAX_NUMBER_PROCESS];
 
     private ArrayList<Integer> disabledProcesses = new ArrayList<Integer>();
     private ArrayList<Integer> enabledProcesses = new ArrayList<Integer>();
     Scanner scanner = new Scanner(System.in);
 
+    /**
+     * Construtor da classe, atribui nas propriedades os valores passados por parametro e registra o processo no metodo
+     * discover
+     * todas as posicoes do matrix clock de cada processo sao iniciadas com valor -1
+     * @param ip ip passado por parametro para o registro do processo
+     * @param port porta passada por parametro para o registro do processo
+     * @param client proprio cliente passado por parametro
+     * @throws Exception
+     */
     public CausalMulticast(String ip, Integer port, ICausalMulticast client) throws Exception {
         this.processList = new HashMap<>();
         this.client = client;
@@ -76,7 +96,15 @@ public class CausalMulticast {
         pool.execute(new Receiver());
     }
 
-    private void discover(String ip, int port) throws Exception {
+    /**
+     * Basicamente cria um MulticastSocket e faz o registro no grupo, enquanto o numero de processo maximo
+     * nao for atigido, este processo vai enviar um Datagram Packet para descobrir novos processos, caso a mesagem
+     * retornada for igual ,significa que este processo sera registrado
+     * @param ip ip passado por parametro para o registro do processo
+     * @param port porta passada por parametro para o registro do processo
+     * @throws Exception
+     */
+    private void discover(String    ip, int port) throws Exception {
         ArrayList<Process> temporaryProcess = new ArrayList<Process>();
         Process currentProcess = new Process(ip, port);
         temporaryProcess.add(currentProcess);
@@ -131,12 +159,20 @@ public class CausalMulticast {
 //        processList.remove(currentProcess);
     }
 
+    /**
+     * Desabilita que um processo possa receber a mensagem
+     * @param id id do processo a ser desativado
+     */
     private void disableProcess(int id) {
         System.out.println("Desativando processo: " + id);
         disabledProcesses.add(id);
         enabledProcesses.remove((Object) id);
     }
 
+    /**
+     * Sincroniza processos que ainda nao receberam a mensagem, e remove aqueles que ja receberam, evitando enviar 2
+     * vezes a mensagem para um processo que já recebeu
+     */
     private void updateDelayedProcess() {
         System.out.println("Trocando lista de processos ativos com desativados");
         var temp = disabledProcesses;
@@ -144,6 +180,9 @@ public class CausalMulticast {
         enabledProcesses = temp;
     }
 
+    /**
+     * Reseta a lista de processos desativados, a partir disso todos passam a poder receber mensagens
+     */
     private void resetDisabledProcess() {
         System.out.println("Resetando lista de processos desativados");
         disabledProcesses.clear();
@@ -166,6 +205,11 @@ public class CausalMulticast {
         return false;
     }
 
+    /**
+     * Adiciona o processo descoberto/a ser registrado a lista de processos
+     * @param temporaryProcess lista de processos
+     * @param data String contendo a informacao do processo descoberto/ a ser registrado
+     */
     private void addProcess(ArrayList<Process> temporaryProcess, String data) {
         String discover_ip = data.split(":")[0];
         String discover_port = data.split(":")[1];
@@ -176,6 +220,11 @@ public class CausalMulticast {
         }
     }
 
+    /**
+     * Faz o controle do envio de mensagens, basicamente decide conforme o input do usuario se a mensagem passada por
+     * parametro deve ser enviada a todos os processos, ou seletivamente, questionando qual processo enviar
+     * @param msg mensagem a ser enviada aos demais processos
+     */
     private void queryForDelayedMessage(String msg) {
         Message message = new Message(msg, processId, matrixClock[processId]);
         System.out.println("Piggyback vector clock: " + Arrays.toString(matrixClock[processId]));
@@ -209,6 +258,13 @@ public class CausalMulticast {
         }
     }
 
+    /**
+     * Envia a mensagem serializada passada por parametro aos demais processos, por meio de um datagram
+     * packet, verificando se o processo em questao a ser enviado, seria um processo habilitado a receber
+     * aquela mensagem
+     * Simula o comportamento de um multicast usando unicast
+     * @param message mensagem a ser enviada
+     */
     private void sendMessageToGroup(Message message) {
 
         for (var processTuple : processList.entrySet()) {
@@ -234,10 +290,18 @@ public class CausalMulticast {
         }
     }
 
+    /**
+     * Simplesmente invoca o metodo que faz o controle do envio de mensagens
+     * @param msg mensagem a ser enviada
+     * @param client
+     */
     public void mcsend(String msg, Object client) {
         queryForDelayedMessage(msg);
     }
 
+    /**
+     * Funcao auxiliar para imprimir o matrix clock
+     */
     private void printMatrixClock() {
         System.out.println("Current process: " + processId);
         System.out.println("Other process: " + processList);
@@ -246,18 +310,32 @@ public class CausalMulticast {
         }
     }
 
+    /**
+     * Classe que implementa uma mensagem que sera enviada por algum processo
+     */
     private static class Message implements Serializable {
         String message;
         int processId;
         Integer[] vectorClock;
         boolean delivered = false;
 
+        /**
+         * Construtor da classe
+         * @param message a mensagem em si a ser entregue
+         * @param processId o id do processo que enviou a mensagem
+         * @param vectorClock vector clock do processo que enviou a mensagem
+         */
         public Message(String message, int processId, Integer[] vectorClock) {
             this.message = message;
             this.processId = processId;
             this.vectorClock = vectorClock.clone();
         }
 
+        /**
+         * Desserializa e retorna um objeto mensagem
+         * @param stream
+         * @return
+         */
         public static Message deserialize(byte[] stream) {
             ByteArrayInputStream inputStream = new ByteArrayInputStream(stream);
             ObjectInputStream s = null;
@@ -270,6 +348,10 @@ public class CausalMulticast {
             return null;
         }
 
+        /**
+         *
+         * @return  Serializa e retorna a mensagem serializada
+         */
         public byte[] serialize() {
             try {
                 ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
@@ -282,6 +364,10 @@ public class CausalMulticast {
             return null;
         }
 
+        /**
+         *
+         * @return informacoes da mensagem formatadas
+         */
         @Override
         public String toString() {
             return "Message{" +
@@ -292,8 +378,17 @@ public class CausalMulticast {
         }
     }
 
+    /**
+     * Classe que instancia uma thread para o recebimento de mensagens
+     */
     private class Receiver implements Runnable {
         @Override
+        /**
+         *  Implementa o Controle de recebimento da mensagem
+         *  A mensagem vai ser recebida e desserializada, entao vai ser verificado a partir do Vector Clock se a
+         *  mensagem pode ser recebida pelo processo. Se todos processos receberem a mensagem, ela sera descartada
+         *  do buffer
+         */
         public void run() {
             while (true) {
                 byte[] buf = new byte[1000];
