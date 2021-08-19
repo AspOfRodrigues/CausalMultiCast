@@ -47,7 +47,6 @@ public class CausalMulticast {
     private static final String GROUP_IP = "228.5.6.7";
     private static final int GROUP_PORT = 6789;
     private static final int MAX_NUMBER_PROCESS = 3;
-    private static final int TIMEOUT = 5000;
 
 
     private int processId;
@@ -108,33 +107,31 @@ public class CausalMulticast {
         ArrayList<Process> temporaryProcess = new ArrayList<Process>();
         Process currentProcess = new Process(ip, port);
         temporaryProcess.add(currentProcess);
-        MulticastSocket socket = new MulticastSocket();
         String msg = ip + ":" + port;
         InetAddress group = InetAddress.getByName(GROUP_IP);
         MulticastSocket s = new MulticastSocket(GROUP_PORT);
         s.joinGroup(group);
+
+        DatagramPacket discoverMsg = new DatagramPacket(msg.getBytes(), msg.length(),
+                group, GROUP_PORT);
         while (temporaryProcess.size() < MAX_NUMBER_PROCESS) {
-            DatagramPacket discoverMsg = new DatagramPacket(msg.getBytes(), msg.length(),
-                    group, GROUP_PORT);
             s.send(discoverMsg);
             byte[] buf = new byte[1000];
             DatagramPacket recv = new DatagramPacket(buf, buf.length);
 
             s.receive(recv);
-
             String data = new String(recv.getData(), recv.getOffset(), recv.getLength());
-            // If we receive the group info, we failed to receive some message before and need to override the info
-            if (data.contains("GROUP")) {
-                System.out.println("Grupo invalido, sobescrevendo informações locais com definição do grupo da rede");
-                String members[] = data.replace("GROUP", "").replace("[", "").
-                        replace("]", "").split(", ");
-                for (String member : members) {
-                    addProcess(temporaryProcess, member);
-                }
-            } else {
-                if (data.equals(msg)) continue;
-                addProcess(temporaryProcess, data);
-            }
+            if (data.equals(msg)) continue;
+            addProcess(temporaryProcess, data);
+        }
+
+        System.out.println("Grupo descoberto, enviando últimas mensagens para certificar que todos membros tem a lista completa");
+        long time = System.currentTimeMillis();
+        long elapsedTime = 0;
+        int timeout = 2000;
+        while(elapsedTime < timeout){
+            s.send(discoverMsg);
+            elapsedTime = System.currentTimeMillis() - time;
         }
 
         temporaryProcess.sort(Comparator.comparing(Process::toString));
@@ -145,18 +142,8 @@ public class CausalMulticast {
 
         System.out.println(processList);
 
-        System.out.println("Finalizou descobrimento, checando por processos que não receberam todo o grupo, e reenvia o grupo inteiro caso necessário");
-        if (!checkTimeout(s)) {
-            System.out.println("Algum processo não recebeu tudo, enviando informações do grupo atual");
-            msg = "GROUP" + temporaryProcess.toString();
-            DatagramPacket discoverMsg = new DatagramPacket(msg.getBytes(), msg.length(),
-                    group, GROUP_PORT);
-            s.send(discoverMsg);
-        }
-
         s.leaveGroup(group);
         this.processId = processList.get(currentProcess);
-//        processList.remove(currentProcess);
     }
 
     /**
@@ -191,31 +178,12 @@ public class CausalMulticast {
         }
     }
 
-    private boolean checkTimeout(MulticastSocket s) throws IOException {
-        byte[] buf = new byte[1000];
-        DatagramPacket recv = new DatagramPacket(buf, buf.length);
-        s.setSoTimeout(4000);
-        try {
-            s.receive(recv);
-            String data = new String(recv.getData(), recv.getOffset(), recv.getLength());
-        } catch (SocketTimeoutException e) {
-            System.out.println("No new message received");
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * Adiciona o processo descoberto/a ser registrado a lista de processos
-     * @param temporaryProcess lista de processos
-     * @param data String contendo a informacao do processo descoberto/ a ser registrado
-     */
-    private void addProcess(ArrayList<Process> temporaryProcess, String data) {
+    private void addProcess(ArrayList<Process> processList, String data) {
         String discover_ip = data.split(":")[0];
         String discover_port = data.split(":")[1];
         Process discoverProcess = new Process(discover_ip, Integer.decode(discover_port));
-        if (!temporaryProcess.contains(discoverProcess)) {
-            temporaryProcess.add(discoverProcess);
+        if (!processList.contains(discoverProcess)) {
+            processList.add(discoverProcess);
             System.out.println("Descobri processo:" + discoverProcess.toString());
         }
     }
@@ -291,7 +259,7 @@ public class CausalMulticast {
     }
 
     /**
-     * Simplesmente invoca o metodo que faz o controle do envio de mensagens
+     * Envia a mensagem ao grupo multicast criado na fase de descobrimento, gerencia o matrix clock para possibilitar ordenação causal e estabilização de mensagens
      * @param msg mensagem a ser enviada
      * @param client
      */
@@ -379,7 +347,7 @@ public class CausalMulticast {
     }
 
     /**
-     * Classe que instancia uma thread para o recebimento de mensagens
+     * Classe que instancia uma thread para o recebimento de mensagens assicrono
      */
     private class Receiver implements Runnable {
         @Override
@@ -387,7 +355,7 @@ public class CausalMulticast {
          *  Implementa o Controle de recebimento da mensagem
          *  A mensagem vai ser recebida e desserializada, entao vai ser verificado a partir do Vector Clock se a
          *  mensagem pode ser recebida pelo processo. Se todos processos receberem a mensagem, ela sera descartada
-         *  do buffer
+         *  do buffer, fazendo a estabilização de mensagens
          */
         public void run() {
             while (true) {
@@ -418,12 +386,8 @@ public class CausalMulticast {
 
                 if (processId != message.processId) matrixClock[processId][message.processId] += 1;
 
-                //Delay message delivery
+                //Delay message delivery - CAUSAL ORDER
                 for (Message item : buffer) {
-//                    System.out.println("_____BEGIN______");
-//                    System.out.println(item);
-//                    printMatrixClock();
-//                    System.out.println("_____END______");
                     if (item.delivered) continue;
                     boolean deliver = true;
                     for (int i = 0; i < MAX_NUMBER_PROCESS; i++) {
@@ -437,7 +401,7 @@ public class CausalMulticast {
                 }
 
 
-                //Discard message from buffer
+                //Discard message from buffer - MESSAGE STABILIZATION
                 for (int index = 0; index < buffer.size(); index++) {
                     Message item = buffer.get(index);
                     if (!item.delivered) continue;
